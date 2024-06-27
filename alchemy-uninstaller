@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# Color codes
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Directories to search in
+OPT_DIR="/opt"
+
+# Directory naming patterns
+PATTERNS=(
+    "alchemy-install"
+    "alchemy-install.backup-*"
+    "alchemy-*-install"
+    "alchemy-*-install.backup-*"
+)
+
+echo
+echo -e "(Unofficial) ${BLUE}Alchemy Viewer Linux Uninstaller${NC}"
+echo
+echo -e "${RED}Disclaimer${NC}: This script is provided 'AS IS' without warranty of any kind. Use at your own risk."
+echo "            Loss of data or system instability may occur, and the author is not responsible for any damage."
+echo "Purpose: This script facilitates the removal of Alchemy Viewer installations from your Linux system."
+echo "Operation: It identifies and removes directories matching specific patterns associated with Alchemy Viewer."
+echo
+
+# Check for trash commands or fallback to rm
+if [ "$(id -u)" -ne 0 ]; then
+    LOCAL_DIR="$HOME/.local/share"
+    if command -v gio &> /dev/null; then
+        TRASH_CMD="gio trash"
+        echo "Found trash utility: gio"
+        echo "Using gio trash instead of rm"
+    elif command -v gvfs-trash &> /dev/null; then
+        TRASH_CMD="gvfs-trash"
+        echo "Found trash utility: gvfs-trash"
+        echo "Using gvfs-trash instead of rm"
+    else
+        TRASH_CMD="rm -rf"
+        echo "No trash utility found. Falling back to rm -rf."
+    fi
+else
+    TRASH_CMD="rm -rf"
+    echo "Running as root. Using rm -rf for deletion."
+fi
+
+# Find directories matching the patterns
+find_directories() {
+    if [ "$(id -u)" -ne 0 ]; then
+        for pattern in "${PATTERNS[@]}"; do
+            find "$LOCAL_DIR" "$OPT_DIR" -maxdepth 1 -type d -name "$pattern"
+        done
+    else
+        for pattern in "${PATTERNS[@]}"; do
+            find "$OPT_DIR" -maxdepth 1 -type d -name "$pattern"
+        done
+    fi
+}
+
+# Check if the directory can be deleted by the user
+check_permission() {
+    if [ -w "$1" ]; then
+        echo "yes"
+    else
+        echo "no"
+    fi
+}
+
+# List directories and check permissions
+list_directories() {
+    echo "Found directories:"
+    local index=1
+    for dir in $(find_directories); do
+        if [ -d "$dir" ]; then
+            perm=$(check_permission "$dir")
+            if [[ "$dir" == *"backup"* || "$dir" == *"alchemy-install" ]]; then
+                status="${YELLOW}previous unused version${NC}"
+            else
+                status="${GREEN}currently installed version${NC}"
+            fi
+            if [ "$perm" == "yes" ]; then
+                echo -e "$index. $dir ($status)"
+            else
+                echo -e "$index. $dir ($status, ${RED}not removable unless run with sudo${NC})"
+            fi
+            index=$((index + 1))
+        fi
+    done
+}
+
+# Delete the selected directories
+delete_directories() {
+    read -p "Enter the numbers of the directories to delete (separated by spaces, or press Enter to skip): " choices
+    if [ -z "$choices" ]; then
+        echo "No directories selected for deletion."
+        return
+    fi
+    local index=1
+    for dir in $(find_directories); do
+        if [[ " $choices " =~ " $index " ]]; then
+            perm=$(check_permission "$dir")
+            if [ "$perm" == "yes" ] || [ "$(id -u)" -eq 0 ]; then
+                $TRASH_CMD "$dir"
+                if [ "$TRASH_CMD" == "rm -rf" ]; then
+                    echo "Deleted $dir with rm"
+                else
+                    echo "Moved $dir to trash"
+                fi
+            else
+                echo "Cannot move $dir to trash. Please run the script with sudo."
+            fi
+        fi
+        index=$((index + 1))
+    done
+}
+
+# Main function
+main() {
+    list_directories
+    delete_directories
+}
+
+main
